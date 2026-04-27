@@ -8,11 +8,32 @@
   <style>
     .model-badge{font-size:10px;background:rgba(99,102,241,.15);color:var(--accent);padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
     .admin-link-btn{background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-left:6px}
+
+    /* Loading screen — shown until auth fully resolves */
+    #auth-loading {
+      position:fixed;inset:0;z-index:9999;
+      background:var(--bg);
+      display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
+    }
+    #auth-loading .al-icon{width:56px;height:56px;background:linear-gradient(135deg,#9333ea,#c084fc);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:28px;}
+    #auth-loading p{color:var(--muted);font-size:14px;font-family:'Segoe UI',sans-serif;}
+    #auth-loading .spin{width:28px;height:28px;border:3px solid rgba(147,51,234,0.2);border-top-color:#9333ea;border-radius:50%;animation:spin .7s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* Main UI hidden until auth done */
+    #app-shell{display:none;flex:1;overflow:hidden;width:100%;}
   </style>
 </head>
 <body class="chat-body">
 <div class="orb orb-1"></div>
 <div class="orb orb-2"></div>
+
+<!-- Auth Loading Screen -->
+<div id="auth-loading">
+  <div class="al-icon">🤖</div>
+  <div class="spin"></div>
+  <p>Loading Pranvix...</p>
+</div>
 
 <!-- Profile Modal -->
 <div class="modal-overlay" id="profile-modal" onclick="closeProfile(event)">
@@ -34,7 +55,8 @@
   </div>
 </div>
 
-<div style="display:flex;flex:1;overflow:hidden;width:100%">
+<!-- Main App Shell (hidden until auth confirmed) -->
+<div id="app-shell">
   <aside class="sidebar">
     <div class="sidebar-header">
       <div class="sidebar-logo"><div class="logo-icon">🤖</div><span class="logo-text">Pranvix</span></div>
@@ -83,13 +105,15 @@
   </main>
 </div>
 
-<!-- Firebase (no Storage SDK needed) -->
+<!-- Firebase SDKs -->
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script>
-firebase.initializeApp(FIREBASE_CONFIG);
+// ── Init Firebase safely (firebase-config.js may already call initializeApp) ──
+let _app;
+try { _app = firebase.app(); } catch(e) { _app = firebase.initializeApp(FIREBASE_CONFIG); }
 const auth = firebase.auth();
 const db   = firebase.firestore();
 
@@ -108,44 +132,62 @@ function handleThemeToggle() {
   document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
 }
 applyTheme();
-document.getElementById('theme-toggle').textContent = (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? '☀️' : '🌙';
+document.getElementById('theme-toggle').textContent =
+  (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? '☀️' : '🌙';
 
 // ── Auth Guard ─────────────────────────────────────────────────────────────
-let authResolved = false;
+// KEY PATTERN: Keep UI hidden (#app-shell display:none) until we are 100%
+// sure the user is authenticated. onAuthStateChanged fires ONCE with null
+// on first load even for logged-in users — we must wait for the real result.
 auth.onAuthStateChanged(async user => {
-  // Firebase fires null initially before resolving the real session.
-  // Wait up to 2s for a real user before redirecting to login.
   if (!user) {
-    if (authResolved) {
-      window.location.href = 'login.html';
-    } else {
-      setTimeout(() => {
-        if (!authResolved) window.location.href = 'login.html';
-      }, 2000);
-    }
+    // Genuinely not logged in → go to login
+    window.location.replace('login.html');
     return;
   }
-  authResolved = true;
-  currentUser = user;
 
   try {
-    const doc = await db.collection('users').doc(user.uid).get();
-    if (!doc.exists || doc.data().isBanned) {
+    const snap = await db.collection('users').doc(user.uid).get();
+
+    if (!snap.exists || snap.data().isBanned) {
       await auth.signOut();
-      window.location.href = 'login.html';
+      window.location.replace('login.html');
       return;
     }
-    userProfile = doc.data();
+
+    // ✅ Confirmed — boot the app
+    currentUser = user;
+    userProfile = snap.data();
+
     if (userProfile.isAdmin || user.email === ADMIN_EMAIL)
       document.getElementById('admin-badge').style.display = 'inline';
+
     document.getElementById('sf-name').textContent   = userProfile.name || userProfile.username;
     document.getElementById('sf-avatar').textContent = (userProfile.name||'U')[0].toUpperCase();
-    loadSidebar();
+
+    // Swap loading screen → app
+    document.getElementById('auth-loading').style.display = 'none';
+    document.getElementById('app-shell').style.display    = 'flex';
+
+    await loadSidebar();
     const sessions = await getSessions();
-    if (sessions.length > 0) loadSession(sessions[0].id); else newChat();
+    if (sessions.length > 0) await loadSession(sessions[0].id); else await newChat();
+
   } catch (err) {
-    console.error('Auth setup error:', err);
-    // Don't redirect on Firestore errors — user is still logged in
+    // Firestore failed (e.g. offline) — if Firebase says user exists, trust it
+    // and show the app rather than kicking the user out
+    console.error('Auth check error:', err);
+    if (user) {
+      currentUser = user;
+      userProfile = { name: user.displayName || user.email.split('@')[0], email: user.email };
+      document.getElementById('sf-name').textContent   = userProfile.name;
+      document.getElementById('sf-avatar').textContent = userProfile.name[0].toUpperCase();
+      document.getElementById('auth-loading').style.display = 'none';
+      document.getElementById('app-shell').style.display    = 'flex';
+      await newChat();
+    } else {
+      window.location.replace('login.html');
+    }
   }
 });
 
@@ -163,12 +205,17 @@ async function createSession(title='New Chat') {
 }
 async function saveMessageToFirestore(sessionId, message) {
   const ref = db.collection('chats').doc(currentUser.uid).collection('sessions').doc(sessionId);
-  await ref.update({ messages: firebase.firestore.FieldValue.arrayUnion(message), updatedAt: new Date().toISOString() });
+  await ref.update({
+    messages: firebase.firestore.FieldValue.arrayUnion(message),
+    updatedAt: new Date().toISOString()
+  });
   const doc = await ref.get();
-  if (message.role==='user' && doc.data().title==='New Chat') {
-    await ref.update({ title: message.content.substring(0,40)+(message.content.length>40?'…':'') });
+  if (message.role === 'user' && doc.data().title === 'New Chat') {
+    await ref.update({ title: message.content.substring(0,40) + (message.content.length>40?'…':'') });
   }
-  await db.collection('users').doc(currentUser.uid).update({ messageCount: firebase.firestore.FieldValue.increment(1) });
+  await db.collection('users').doc(currentUser.uid).update({
+    messageCount: firebase.firestore.FieldValue.increment(1)
+  });
   const today = new Date().toISOString().split('T')[0];
   await db.collection('stats').doc('global').set({
     totalMessages: firebase.firestore.FieldValue.increment(1),
@@ -184,12 +231,14 @@ async function loadSidebar() {
     list.innerHTML = `<div style="padding:16px 10px;font-size:13px;color:var(--muted);text-align:center">No chats yet.<br>Start a conversation!</div>`;
     return;
   }
-  const today = new Date().toDateString(), yesterday = new Date(Date.now()-86400000).toDateString();
-  const groups = {};
+  const today     = new Date().toDateString();
+  const yesterday = new Date(Date.now()-86400000).toDateString();
+  const groups    = {};
   sessions.forEach(s => {
-    const d = new Date(s.createdAt).toDateString();
-    const label = d===today?'Today':d===yesterday?'Yesterday':new Date(s.createdAt).toLocaleDateString('en-IN',{month:'short',day:'numeric'});
-    if (!groups[label]) groups[label]=[];
+    const d     = new Date(s.createdAt).toDateString();
+    const label = d===today ? 'Today' : d===yesterday ? 'Yesterday'
+                : new Date(s.createdAt).toLocaleDateString('en-IN',{month:'short',day:'numeric'});
+    if (!groups[label]) groups[label] = [];
     groups[label].push(s);
   });
   let html = '';
@@ -215,13 +264,14 @@ async function newChat() {
 }
 async function loadSession(sessionId) {
   currentSessionId = sessionId;
-  const doc = await db.collection('chats').doc(currentUser.uid).collection('sessions').doc(sessionId).get();
+  const doc = await db.collection('chats').doc(currentUser.uid)
+    .collection('sessions').doc(sessionId).get();
   if (!doc.exists) return;
   conversationHistory = [];
   document.getElementById('chat-container').innerHTML = '';
   (doc.data().messages||[]).slice(-30).forEach(m => {
-    const html = m.role==='assistant' ? fmt(m.content) : m.content;
-    addMessage(html, m.role==='assistant'?'bot':'user');
+    addMessage(m.role==='assistant' ? fmt(m.content) : m.content,
+               m.role==='assistant' ? 'bot' : 'user');
     conversationHistory.push({ role: m.role, content: m.content });
   });
   document.getElementById('chat-container').scrollTop = 99999;
@@ -230,9 +280,9 @@ async function loadSession(sessionId) {
 async function deleteSession(id, e) {
   e.stopPropagation();
   await db.collection('chats').doc(currentUser.uid).collection('sessions').doc(id).delete();
-  if (id===currentSessionId) {
+  if (id === currentSessionId) {
     const sessions = await getSessions();
-    if (sessions.length>0) await loadSession(sessions[0].id); else await newChat();
+    if (sessions.length > 0) await loadSession(sessions[0].id); else await newChat();
   }
   await loadSidebar();
 }
@@ -257,29 +307,31 @@ function addMessage(html, sender, isError=false, modelBadge='') {
   const container = document.getElementById('chat-container');
   const div = document.createElement('div');
   div.className = `message ${sender}`;
-  const av = sender==='bot' ? 'PX' : (userProfile?.name||'U')[0].toUpperCase();
+  const av    = sender==='bot' ? 'PX' : (userProfile?.name||'U')[0].toUpperCase();
   const badge = modelBadge ? `<span class="model-badge">${modelBadge}</span>` : '';
   div.innerHTML = `<div class="msg-avatar">${av}</div><div class="msg-bubble ${isError?'error-bubble':''}">${html}${badge}</div>`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
 function showTyping() {
-  const c=document.getElementById('chat-container');
-  const d=document.createElement('div'); d.className='message bot'; d.id='typing-indicator';
-  d.innerHTML=`<div class="msg-avatar">PX</div><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
-  c.appendChild(d); c.scrollTop=c.scrollHeight;
+  const c = document.getElementById('chat-container');
+  const d = document.createElement('div');
+  d.className = 'message bot'; d.id = 'typing-indicator';
+  d.innerHTML = `<div class="msg-avatar">PX</div><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  c.appendChild(d); c.scrollTop = c.scrollHeight;
 }
-function removeTyping(){ document.getElementById('typing-indicator')?.remove(); }
+function removeTyping() { document.getElementById('typing-indicator')?.remove(); }
 function setSendState(on) {
-  isTyping=on;
-  document.getElementById('chat-input').disabled=on;
-  const btn=document.getElementById('send-btn');
-  btn.style.opacity=on?'0.5':'1'; btn.style.cursor=on?'not-allowed':'pointer';
+  isTyping = on;
+  document.getElementById('chat-input').disabled = on;
+  const btn = document.getElementById('send-btn');
+  btn.style.opacity = on ? '0.5' : '1';
+  btn.style.cursor  = on ? 'not-allowed' : 'pointer';
 }
 function showWelcome() {
   addMessage(`👋 Hello, <strong>${userProfile?.name}</strong>! I'm <strong>Pranvix AI</strong> 🤖<br><br>
-   Your AI-Powered Study Companion. I can help with Java, Python, SQL, HTML/CSS, Data Structures and more!<br><br>
-   Type your question or pick a suggestion below! 🚀`, 'bot');
+Your AI-Powered Study Companion. I can help with Java, Python, SQL, HTML/CSS, Data Structures and more!<br><br>
+Type your question or pick a suggestion below! 🚀`, 'bot');
 }
 
 // ── API Call ───────────────────────────────────────────────────────────────
@@ -292,20 +344,21 @@ async function callAPI(userMessage) {
   conversationHistory.push({ role:'user', content:userMessage });
   if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-40);
 
-  const body = { system: SYSTEM_PROMPT(), messages: conversationHistory };
-
   const response = await fetch('/api/chat', {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ system: SYSTEM_PROMPT(), messages: conversationHistory })
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error?.message||`Server error ${response.status}`);
+  if (!response.ok) throw new Error(data.error?.message || `Server error ${response.status}`);
 
   const reply = data.content[0].text;
   conversationHistory.push({ role:'assistant', content:reply });
 
-  const modelLabel = data.model==='gemini-1.5-flash' ? '✨ Gemini' : '⚡ Groq';
+  const modelLabel = data.model === 'gemini-1.5-flash' ? '✨ Gemini' : '⚡ Groq';
   if (data.usage?.output_tokens)
-    document.getElementById('token-info').textContent = `${data.usage.input_tokens} in · ${data.usage.output_tokens} out`;
+    document.getElementById('token-info').textContent =
+      `${data.usage.input_tokens} in · ${data.usage.output_tokens} out`;
 
   return { reply, modelLabel };
 }
@@ -321,7 +374,7 @@ async function sendMessage() {
 
   addMessage(text, 'user');
   await saveMessageToFirestore(currentSessionId, {
-    role:'user', content:text, time:new Date().toISOString()
+    role: 'user', content: text, time: new Date().toISOString()
   });
 
   showTyping();
@@ -329,30 +382,45 @@ async function sendMessage() {
     const { reply, modelLabel } = await callAPI(text);
     removeTyping();
     addMessage(fmt(reply), 'bot', false, modelLabel);
-    await saveMessageToFirestore(currentSessionId, { role:'assistant', content:reply, time:new Date().toISOString() });
+    await saveMessageToFirestore(currentSessionId, {
+      role: 'assistant', content: reply, time: new Date().toISOString()
+    });
     await loadSidebar();
   } catch(err) {
     removeTyping();
     addMessage(`⚠️ <strong>Error:</strong> ${err.message}`, 'bot', true);
-  } finally { setSendState(false); input.focus(); }
+  } finally {
+    setSendState(false);
+    input.focus();
+  }
 }
 
-function quickSend(t){ document.getElementById('chat-input').value=t; sendMessage(); }
-document.getElementById('chat-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
+function quickSend(t) { document.getElementById('chat-input').value = t; sendMessage(); }
+document.getElementById('chat-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
 
 // ── Profile ────────────────────────────────────────────────────────────────
-async function openProfile() {
+function openProfile() {
   document.getElementById('modal-avatar').textContent   = (userProfile.name||'U')[0].toUpperCase();
-  document.getElementById('modal-name').textContent     = userProfile.name||userProfile.username;
-  document.getElementById('modal-email').textContent    = userProfile.email||'—';
-  document.getElementById('modal-username').textContent = userProfile.username||'—';
-  document.getElementById('modal-joined').textContent   = userProfile.createdAt ? new Date(userProfile.createdAt).toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'}) : '—';
-  document.getElementById('modal-msgs').textContent     = userProfile.messageCount||0;
+  document.getElementById('modal-name').textContent     = userProfile.name || userProfile.username;
+  document.getElementById('modal-email').textContent    = userProfile.email || '—';
+  document.getElementById('modal-username').textContent = userProfile.username || '—';
+  document.getElementById('modal-joined').textContent   = userProfile.createdAt
+    ? new Date(userProfile.createdAt).toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'}) : '—';
+  document.getElementById('modal-msgs').textContent     = userProfile.messageCount || 0;
   document.getElementById('profile-modal').classList.add('open');
 }
-function closeProfile(e){ if(e.target===document.getElementById('profile-modal')) document.getElementById('profile-modal').classList.remove('open'); }
-function closeProfileBtn(){ document.getElementById('profile-modal').classList.remove('open'); }
-function confirmLogout(){ if(confirm('Sign out of Pranvix?')){ auth.signOut(); window.location.href='login.html'; } }
+function closeProfile(e) {
+  if (e.target === document.getElementById('profile-modal'))
+    document.getElementById('profile-modal').classList.remove('open');
+}
+function closeProfileBtn() { document.getElementById('profile-modal').classList.remove('open'); }
+function confirmLogout() {
+  if (confirm('Sign out of Pranvix?')) {
+    auth.signOut().then(() => window.location.replace('login.html'));
+  }
+}
 </script>
 </body>
 </html>
