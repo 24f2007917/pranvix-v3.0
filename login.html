@@ -48,18 +48,16 @@
     </div>
   </div>
 
-  <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
   <script src="firebase-config.js"></script>
   <script>
-    // ── Init Firebase ──────────────────────────────────────────
     firebase.initializeApp(FIREBASE_CONFIG);
     const auth = firebase.auth();
     const db   = firebase.firestore();
 
-    // ── Theme ──────────────────────────────────────────────────
+    // Theme
     function applyTheme() {
       const t = localStorage.getItem('pranvix_theme') || 'dark';
       document.documentElement.setAttribute('data-theme', t);
@@ -73,10 +71,8 @@
     }
     applyTheme();
 
-    // ── Redirect if already logged in ──────────────────────────
-    auth.onAuthStateChanged(user => {
-      if (user) window.location.href = 'chatbot.html';
-    });
+    // DO NOT use onAuthStateChanged here — it causes redirect loops.
+    // Only redirect after explicit successful login below.
 
     function showAlert(id, type, msg) {
       const el = document.getElementById(id);
@@ -103,25 +99,34 @@
         return showAlert('alert-error', 'error', '⚠️ Please fill in all fields.');
 
       if (!email.endsWith('@bbdu.ac.in'))
-        return showAlert('alert-error', 'error', '🚫 Only <strong>@bbdu.ac.in</strong> email addresses are allowed.');
+        return showAlert('alert-error', 'error', '🚫 Only <strong>@bbdu.ac.in</strong> emails allowed.');
 
       setLoading(true);
       try {
+        // Set persistence to LOCAL before signing in
+        await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
         const cred = await auth.signInWithEmailAndPassword(email, password);
+
         // Check if banned
         const userDoc = await db.collection('users').doc(cred.user.uid).get();
         if (userDoc.exists && userDoc.data().isBanned) {
           await auth.signOut();
-          return showAlert('alert-error', 'error', '🚫 Your account has been banned. Contact support.');
+          return showAlert('alert-error', 'error', '🚫 Your account has been banned.');
         }
+
         // Update lastLogin
         await db.collection('users').doc(cred.user.uid).update({ lastLogin: new Date().toISOString() });
+
+        // Small delay to let Firebase persist the session to localStorage
+        await new Promise(r => setTimeout(r, 300));
+
         window.location.href = 'chatbot.html';
       } catch (err) {
-        const msg = err.code === 'auth/user-not-found'    ? '❌ No account with this email.'
-                  : err.code === 'auth/wrong-password'    ? '❌ Incorrect password.'
-                  : err.code === 'auth/invalid-credential'? '❌ Invalid email or password.'
-                  : err.code === 'auth/too-many-requests' ? '⚠️ Too many attempts. Try again later.'
+        const msg = err.code === 'auth/user-not-found'     ? '❌ No account with this email.'
+                  : err.code === 'auth/wrong-password'     ? '❌ Incorrect password.'
+                  : err.code === 'auth/invalid-credential' ? '❌ Invalid email or password.'
+                  : err.code === 'auth/too-many-requests'  ? '⚠️ Too many attempts. Try again later.'
                   : `❌ ${err.message}`;
         showAlert('alert-error', 'error', msg);
       } finally { setLoading(false); }
