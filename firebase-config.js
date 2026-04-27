@@ -23,9 +23,6 @@ const FIREBASE_CONFIG = {
   appId: "1:817112176548:web:d4cc63f20afceff6a29331"
 };
 
-// Initialize Firebase
-const app = initializeApp(FIREBASE_CONFIG);
-
 // ─── Admin email (only this email gets access to /admin.html) ───
 const ADMIN_EMAIL = "ujjwalsingh16072006@bbdu.ac.in";
 
