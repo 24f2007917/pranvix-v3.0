@@ -8,19 +8,11 @@
   <style>
     .model-badge{font-size:10px;background:rgba(99,102,241,.15);color:var(--accent);padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
     .admin-link-btn{background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-left:6px}
-
-    /* Loading screen — shown until auth fully resolves */
-    #auth-loading {
-      position:fixed;inset:0;z-index:9999;
-      background:var(--bg);
-      display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;
-    }
+    #auth-loading{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;}
     #auth-loading .al-icon{width:56px;height:56px;background:linear-gradient(135deg,#9333ea,#c084fc);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:28px;}
     #auth-loading p{color:var(--muted);font-size:14px;font-family:'Segoe UI',sans-serif;}
     #auth-loading .spin{width:28px;height:28px;border:3px solid rgba(147,51,234,0.2);border-top-color:#9333ea;border-radius:50%;animation:spin .7s linear infinite;}
     @keyframes spin{to{transform:rotate(360deg)}}
-
-    /* Main UI hidden until auth done */
     #app-shell{display:none;flex:1;overflow:hidden;width:100%;}
   </style>
 </head>
@@ -55,7 +47,7 @@
   </div>
 </div>
 
-<!-- Main App Shell (hidden until auth confirmed) -->
+<!-- Main App (hidden until auth confirmed) -->
 <div id="app-shell">
   <aside class="sidebar">
     <div class="sidebar-header">
@@ -81,9 +73,7 @@
         <button class="icon-btn" onclick="confirmLogout()" title="Sign out" style="color:var(--red)">⏻</button>
       </div>
     </header>
-
     <div class="chat-container" id="chat-container"></div>
-
     <footer class="chat-footer">
       <div class="input-row">
         <input type="text" id="chat-input" placeholder="Ask Pranvix anything..." autocomplete="off"/>
@@ -111,7 +101,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script>
-// ── Init Firebase safely (firebase-config.js may already call initializeApp) ──
+// ── Init ───────────────────────────────────────────────────────────────────
 let _app;
 try { _app = firebase.app(); } catch(e) { _app = firebase.initializeApp(FIREBASE_CONFIG); }
 const auth = firebase.auth();
@@ -135,17 +125,8 @@ applyTheme();
 document.getElementById('theme-toggle').textContent =
   (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? '☀️' : '🌙';
 
-// ── Auth Guard ─────────────────────────────────────────────────────────────
-// KEY PATTERN: Keep UI hidden (#app-shell display:none) until we are 100%
-// sure the user is authenticated. onAuthStateChanged fires ONCE with null
-// on first load even for logged-in users — we must wait for the real result.
-auth.onAuthStateChanged(async user => {
-  if (!user) {
-    // Genuinely not logged in → go to login
-    window.location.replace('login.html');
-    return;
-  }
-
+// ── Boot app once we have a confirmed user ─────────────────────────────────
+async function bootApp(user) {
   try {
     const snap = await db.collection('users').doc(user.uid).get();
 
@@ -155,9 +136,8 @@ auth.onAuthStateChanged(async user => {
       return;
     }
 
-    // ✅ Confirmed — boot the app
     currentUser = user;
-    userProfile = snap.data();
+    userProfile  = snap.data();
 
     if (userProfile.isAdmin || user.email === ADMIN_EMAIL)
       document.getElementById('admin-badge').style.display = 'inline';
@@ -165,7 +145,6 @@ auth.onAuthStateChanged(async user => {
     document.getElementById('sf-name').textContent   = userProfile.name || userProfile.username;
     document.getElementById('sf-avatar').textContent = (userProfile.name||'U')[0].toUpperCase();
 
-    // Swap loading screen → app
     document.getElementById('auth-loading').style.display = 'none';
     document.getElementById('app-shell').style.display    = 'flex';
 
@@ -174,20 +153,42 @@ auth.onAuthStateChanged(async user => {
     if (sessions.length > 0) await loadSession(sessions[0].id); else await newChat();
 
   } catch (err) {
-    // Firestore failed (e.g. offline) — if Firebase says user exists, trust it
-    // and show the app rather than kicking the user out
-    console.error('Auth check error:', err);
-    if (user) {
-      currentUser = user;
-      userProfile = { name: user.displayName || user.email.split('@')[0], email: user.email };
-      document.getElementById('sf-name').textContent   = userProfile.name;
-      document.getElementById('sf-avatar').textContent = userProfile.name[0].toUpperCase();
-      document.getElementById('auth-loading').style.display = 'none';
-      document.getElementById('app-shell').style.display    = 'flex';
-      await newChat();
-    } else {
-      window.location.replace('login.html');
-    }
+    console.error('bootApp error:', err);
+    // Firestore permission error — show error on loading screen, don't loop
+    document.getElementById('auth-loading').innerHTML =
+      `<div class="al-icon">⚠️</div>
+       <p style="color:#ef4444;text-align:center;padding:0 24px">
+         Failed to load profile.<br><small>${err.message}</small>
+       </p>
+       <button onclick="auth.signOut().then(()=>location.replace('login.html'))"
+         style="background:#9333ea;color:#fff;border:none;border-radius:10px;padding:10px 24px;cursor:pointer;font-size:14px">
+         Back to Login
+       </button>`;
+  }
+}
+
+// ── Auth Guard ─────────────────────────────────────────────────────────────
+// Use auth.currentUser FIRST (synchronous, available if already signed in),
+// only fall back to onAuthStateChanged for the async case.
+// This eliminates the false-null first-fire problem entirely.
+
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).then(() => {
+  // After ensuring persistence is LOCAL, check if already signed in
+  const immediateUser = auth.currentUser;
+  if (immediateUser) {
+    // Already signed in — boot immediately, no flicker
+    bootApp(immediateUser);
+  } else {
+    // Wait for Firebase to restore the session
+    const unsub = auth.onAuthStateChanged(user => {
+      unsub(); // Unsubscribe immediately — only need the first real result
+      if (user) {
+        bootApp(user);
+      } else {
+        // Truly not logged in
+        window.location.replace('login.html');
+      }
+    });
   }
 });
 
