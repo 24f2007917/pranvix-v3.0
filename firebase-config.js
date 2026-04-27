@@ -1,21 +1,11 @@
 /**
  * ╔══════════════════════════════════════════════════════╗
  * ║   PRANVIX V2 — Firebase Configuration               ║
- * ║   Fill in YOUR Firebase project details below       ║
  * ╚══════════════════════════════════════════════════════╝
- *
- * HOW TO GET THESE VALUES:
- * 1. Go to https://console.firebase.google.com
- * 2. Create a new project (or open existing)
- * 3. Click the Web icon (</>)  to add a web app
- * 4. Copy the firebaseConfig object and paste below
- * 5. Enable Authentication → Email/Password
- * 6. Enable Firestore Database (Start in test mode)
- * 7. Enable Storage (Start in test mode)
  */
 
 const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyCewIz5_LxFFxOAzsiscMDoYErFH2c3vK0",
+  apiKey: "AIzaSyCewIz5_LxFFxOAzsiscMDoYErFH2c3vK0",
   authDomain: "pranvix-1.firebaseapp.com",
   projectId: "pranvix-1",
   storageBucket: "pranvix-1.firebasestorage.app",
@@ -28,3 +18,7 @@ const ADMIN_EMAIL = "ujjwalsingh16072006@bbdu.ac.in";
 
 // ─── BBDU email restriction ─────────────────────────────────────
 const ALLOWED_EMAIL_DOMAIN = "@bbdu.ac.in";
+
+// NOTE: Do NOT call firebase.initializeApp() here.
+// Each page (login, register, chatbot, admin) calls it themselves
+// using a try/catch guard to avoid double-initialisation errors.
