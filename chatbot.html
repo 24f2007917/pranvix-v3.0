@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pranvix — AI Chat</title>
+  <link rel="stylesheet" href="style.css"/>
+  <style>
+    .model-badge{font-size:10px;background:rgba(99,102,241,.15);color:var(--accent);padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+    .admin-link-btn{background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-left:6px}
+  </style>
+</head>
+<body class="chat-body">
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<!-- Profile Modal -->
+<div class="modal-overlay" id="profile-modal" onclick="closeProfile(event)">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="closeProfileBtn()">✕</button>
+    <div class="profile-avatar-lg" id="modal-avatar">U</div>
+    <div class="profile-name" id="modal-name">User</div>
+    <div class="profile-role">B.Tech CSE AI&amp;B 1-A &bull; BBDU</div>
+    <div class="profile-info-grid" style="margin-top:20px">
+      <div class="profile-info-item"><div class="pii-icon">📧</div><div><div class="pii-label">Email</div><div class="pii-value" id="modal-email">—</div></div></div>
+      <div class="profile-info-item"><div class="pii-icon">👤</div><div><div class="pii-label">Username</div><div class="pii-value" id="modal-username">—</div></div></div>
+      <div class="profile-info-item"><div class="pii-icon">📅</div><div><div class="pii-label">Member Since</div><div class="pii-value" id="modal-joined">—</div></div></div>
+      <div class="profile-info-item"><div class="pii-icon">💬</div><div><div class="pii-label">Total Messages</div><div class="pii-value" id="modal-msgs">0</div></div></div>
+    </div>
+    <div class="modal-footer">
+      🤖 Pranvix AI &bull; Java Fundamentals Project &bull; BBDU 2024–25<br>
+      <span style="margin-top:4px;display:block">Pratiksha &bull; Anvesha Chauhan &bull; Ujjwal Singh</span>
+    </div>
+  </div>
+</div>
+
+<div style="display:flex;flex:1;overflow:hidden;width:100%">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo"><div class="logo-icon">🤖</div><span class="logo-text">Pranvix</span></div>
+      <button class="new-chat-btn" onclick="newChat()">+ New Chat</button>
+    </div>
+    <div class="sidebar-section-title">Chat History</div>
+    <div class="history-list" id="history-list"><div style="padding:16px 10px;font-size:13px;color:var(--muted);text-align:center">Loading chats...</div></div>
+    <div class="sidebar-footer">
+      <div class="sf-avatar" id="sf-avatar">U</div>
+      <div class="sf-info"><div class="sf-name" id="sf-name">User</div><div class="sf-role">B.Tech CSE AI&amp;B 1-A</div></div>
+      <button class="sf-btn" onclick="openProfile()" title="View Profile">⚙️</button>
+    </div>
+  </aside>
+
+  <main class="chat-main">
+    <header class="chat-header">
+      <div class="chat-header-left"><div class="chat-title">🤖 Pranvix AI</div></div>
+      <div class="chat-header-right">
+        <span id="admin-badge" style="display:none"><button class="admin-link-btn" onclick="window.location.href='admin.html'">🛡 Admin</button></span>
+        <button class="icon-btn" id="theme-toggle" onclick="handleThemeToggle()" title="Toggle theme">☀️</button>
+        <button class="icon-btn" onclick="openProfile()" title="Profile">👤</button>
+        <button class="icon-btn" onclick="confirmLogout()" title="Sign out" style="color:var(--red)">⏻</button>
+      </div>
+    </header>
+
+    <div class="chat-container" id="chat-container"></div>
+
+    <footer class="chat-footer">
+      <div class="input-row">
+        <input type="text" id="chat-input" placeholder="Ask Pranvix anything..." autocomplete="off"/>
+        <button id="send-btn" onclick="sendMessage()">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      <div class="footer-bottom">
+        <div class="suggestions">
+          <span class="chip" onclick="quickSend('Explain Java OOP with examples')">☕ Java OOP</span>
+          <span class="chip" onclick="quickSend('Explain SQL with basic queries')">🗄 SQL</span>
+          <span class="chip" onclick="quickSend('Tell me a programming joke')">😂 Joke</span>
+          <span class="chip" onclick="quickSend('Help me understand arrays in Java')">📦 Arrays</span>
+          <span class="chip" onclick="quickSend('What is HTML and CSS?')">🌐 HTML/CSS</span>
+        </div>
+        <div class="token-info" id="token-info"></div>
+      </div>
+    </footer>
+  </main>
+</div>
+
+<!-- Firebase (no Storage SDK needed) -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db   = firebase.firestore();
+
+let currentUser = null, userProfile = null;
+let conversationHistory = [], isTyping = false, currentSessionId = null;
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function applyTheme() {
+  const t = localStorage.getItem('pranvix_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+}
+function handleThemeToggle() {
+  const next = (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('pranvix_theme', next);
+  applyTheme();
+  document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
+}
+applyTheme();
+document.getElementById('theme-toggle').textContent = (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? '☀️' : '🌙';
+
+// ── Auth Guard ─────────────────────────────────────────────────────────────
+let authResolved = false;
+auth.onAuthStateChanged(async user => {
+  // Firebase fires null initially before resolving the real session.
+  // Wait up to 2s for a real user before redirecting to login.
+  if (!user) {
+    if (authResolved) {
+      window.location.href = 'login.html';
+    } else {
+      setTimeout(() => {
+        if (!authResolved) window.location.href = 'login.html';
+      }, 2000);
+    }
+    return;
+  }
+  authResolved = true;
+  currentUser = user;
+
+  try {
+    const doc = await db.collection('users').doc(user.uid).get();
+    if (!doc.exists || doc.data().isBanned) {
+      await auth.signOut();
+      window.location.href = 'login.html';
+      return;
+    }
+    userProfile = doc.data();
+    if (userProfile.isAdmin || user.email === ADMIN_EMAIL)
+      document.getElementById('admin-badge').style.display = 'inline';
+    document.getElementById('sf-name').textContent   = userProfile.name || userProfile.username;
+    document.getElementById('sf-avatar').textContent = (userProfile.name||'U')[0].toUpperCase();
+    loadSidebar();
+    const sessions = await getSessions();
+    if (sessions.length > 0) loadSession(sessions[0].id); else newChat();
+  } catch (err) {
+    console.error('Auth setup error:', err);
+    // Don't redirect on Firestore errors — user is still logged in
+  }
+});
+
+// ── Firestore helpers ──────────────────────────────────────────────────────
+async function getSessions() {
+  const snap = await db.collection('chats').doc(currentUser.uid)
+    .collection('sessions').orderBy('updatedAt','desc').limit(30).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+async function createSession(title='New Chat') {
+  const now = new Date().toISOString();
+  const ref = await db.collection('chats').doc(currentUser.uid)
+    .collection('sessions').add({ title, createdAt: now, updatedAt: now, messages: [] });
+  return ref.id;
+}
+async function saveMessageToFirestore(sessionId, message) {
+  const ref = db.collection('chats').doc(currentUser.uid).collection('sessions').doc(sessionId);
+  await ref.update({ messages: firebase.firestore.FieldValue.arrayUnion(message), updatedAt: new Date().toISOString() });
+  const doc = await ref.get();
+  if (message.role==='user' && doc.data().title==='New Chat') {
+    await ref.update({ title: message.content.substring(0,40)+(message.content.length>40?'…':'') });
+  }
+  await db.collection('users').doc(currentUser.uid).update({ messageCount: firebase.firestore.FieldValue.increment(1) });
+  const today = new Date().toISOString().split('T')[0];
+  await db.collection('stats').doc('global').set({
+    totalMessages: firebase.firestore.FieldValue.increment(1),
+    [`daily.${today}`]: firebase.firestore.FieldValue.increment(1)
+  }, { merge: true });
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+async function loadSidebar() {
+  const sessions = await getSessions();
+  const list = document.getElementById('history-list');
+  if (!sessions.length) {
+    list.innerHTML = `<div style="padding:16px 10px;font-size:13px;color:var(--muted);text-align:center">No chats yet.<br>Start a conversation!</div>`;
+    return;
+  }
+  const today = new Date().toDateString(), yesterday = new Date(Date.now()-86400000).toDateString();
+  const groups = {};
+  sessions.forEach(s => {
+    const d = new Date(s.createdAt).toDateString();
+    const label = d===today?'Today':d===yesterday?'Yesterday':new Date(s.createdAt).toLocaleDateString('en-IN',{month:'short',day:'numeric'});
+    if (!groups[label]) groups[label]=[];
+    groups[label].push(s);
+  });
+  let html = '';
+  for (const [label, items] of Object.entries(groups)) {
+    html += `<div class="history-date-label">${label}</div>`;
+    items.forEach(s => {
+      html += `<div class="history-item ${s.id===currentSessionId?'active':''}" onclick="loadSession('${s.id}')" title="${s.title}">
+        <span class="hi-icon">💬</span><span class="hi-text">${s.title}</span>
+        <button onclick="deleteSession('${s.id}',event)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;margin-left:auto">✕</button>
+      </div>`;
+    });
+  }
+  list.innerHTML = html;
+}
+
+async function newChat() {
+  currentSessionId = await createSession('New Chat');
+  conversationHistory = [];
+  document.getElementById('chat-container').innerHTML = '';
+  document.getElementById('token-info').textContent = '';
+  await loadSidebar();
+  setTimeout(showWelcome, 250);
+}
+async function loadSession(sessionId) {
+  currentSessionId = sessionId;
+  const doc = await db.collection('chats').doc(currentUser.uid).collection('sessions').doc(sessionId).get();
+  if (!doc.exists) return;
+  conversationHistory = [];
+  document.getElementById('chat-container').innerHTML = '';
+  (doc.data().messages||[]).slice(-30).forEach(m => {
+    const html = m.role==='assistant' ? fmt(m.content) : m.content;
+    addMessage(html, m.role==='assistant'?'bot':'user');
+    conversationHistory.push({ role: m.role, content: m.content });
+  });
+  document.getElementById('chat-container').scrollTop = 99999;
+  await loadSidebar();
+}
+async function deleteSession(id, e) {
+  e.stopPropagation();
+  await db.collection('chats').doc(currentUser.uid).collection('sessions').doc(id).delete();
+  if (id===currentSessionId) {
+    const sessions = await getSessions();
+    if (sessions.length>0) await loadSession(sessions[0].id); else await newChat();
+  }
+  await loadSidebar();
+}
+
+// ── Markdown ───────────────────────────────────────────────────────────────
+function fmt(text) {
+  return text
+    .replace(/```(\w*)\n?([\s\S]*?)```/g,'<pre><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/^#{3}\s(.+)$/gm,'<h4 style="margin:8px 0 4px;color:var(--accent)">$1</h4>')
+    .replace(/^#{2}\s(.+)$/gm,'<h3 style="margin:10px 0 5px;color:var(--accent)">$1</h3>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>')
+    .replace(/(<li>[\s\S]+?<\/li>)/g,'<ul>$1</ul>')
+    .replace(/\n{2,}/g,'<br><br>')
+    .replace(/\n/g,'<br>');
+}
+
+// ── UI ─────────────────────────────────────────────────────────────────────
+function addMessage(html, sender, isError=false, modelBadge='') {
+  const container = document.getElementById('chat-container');
+  const div = document.createElement('div');
+  div.className = `message ${sender}`;
+  const av = sender==='bot' ? 'PX' : (userProfile?.name||'U')[0].toUpperCase();
+  const badge = modelBadge ? `<span class="model-badge">${modelBadge}</span>` : '';
+  div.innerHTML = `<div class="msg-avatar">${av}</div><div class="msg-bubble ${isError?'error-bubble':''}">${html}${badge}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+function showTyping() {
+  const c=document.getElementById('chat-container');
+  const d=document.createElement('div'); d.className='message bot'; d.id='typing-indicator';
+  d.innerHTML=`<div class="msg-avatar">PX</div><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  c.appendChild(d); c.scrollTop=c.scrollHeight;
+}
+function removeTyping(){ document.getElementById('typing-indicator')?.remove(); }
+function setSendState(on) {
+  isTyping=on;
+  document.getElementById('chat-input').disabled=on;
+  const btn=document.getElementById('send-btn');
+  btn.style.opacity=on?'0.5':'1'; btn.style.cursor=on?'not-allowed':'pointer';
+}
+function showWelcome() {
+  addMessage(`👋 Hello, <strong>${userProfile?.name}</strong>! I'm <strong>Pranvix AI</strong> 🤖<br><br>
+   Your AI-Powered Study Companion. I can help with Java, Python, SQL, HTML/CSS, Data Structures and more!<br><br>
+   Type your question or pick a suggestion below! 🚀`, 'bot');
+}
+
+// ── API Call ───────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = () => `You are Pranvix, a friendly and intelligent AI assistant created as a college project by Pratiksha, Anvesha Chauhan, and Ujjwal Singh — B.Tech CSE AI&B 1-A students at Babu Banarasi Das University (BBDU), Lucknow, for their Java Fundamentals subject.
+Your personality: friendly, encouraging, clear structured explanations, use emojis occasionally, format code with backtick code blocks.
+Specialise in: Java, Python, Web Dev, SQL, Data Structures, and general CS topics.
+The user's name is: ${userProfile?.name||'Student'}.`;
+
+async function callAPI(userMessage) {
+  conversationHistory.push({ role:'user', content:userMessage });
+  if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-40);
+
+  const body = { system: SYSTEM_PROMPT(), messages: conversationHistory };
+
+  const response = await fetch('/api/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message||`Server error ${response.status}`);
+
+  const reply = data.content[0].text;
+  conversationHistory.push({ role:'assistant', content:reply });
+
+  const modelLabel = data.model==='gemini-1.5-flash' ? '✨ Gemini' : '⚡ Groq';
+  if (data.usage?.output_tokens)
+    document.getElementById('token-info').textContent = `${data.usage.input_tokens} in · ${data.usage.output_tokens} out`;
+
+  return { reply, modelLabel };
+}
+
+// ── Send ───────────────────────────────────────────────────────────────────
+async function sendMessage() {
+  if (isTyping) return;
+  const input = document.getElementById('chat-input');
+  const text  = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  setSendState(true);
+
+  addMessage(text, 'user');
+  await saveMessageToFirestore(currentSessionId, {
+    role:'user', content:text, time:new Date().toISOString()
+  });
+
+  showTyping();
+  try {
+    const { reply, modelLabel } = await callAPI(text);
+    removeTyping();
+    addMessage(fmt(reply), 'bot', false, modelLabel);
+    await saveMessageToFirestore(currentSessionId, { role:'assistant', content:reply, time:new Date().toISOString() });
+    await loadSidebar();
+  } catch(err) {
+    removeTyping();
+    addMessage(`⚠️ <strong>Error:</strong> ${err.message}`, 'bot', true);
+  } finally { setSendState(false); input.focus(); }
+}
+
+function quickSend(t){ document.getElementById('chat-input').value=t; sendMessage(); }
+document.getElementById('chat-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
+
+// ── Profile ────────────────────────────────────────────────────────────────
+async function openProfile() {
+  document.getElementById('modal-avatar').textContent   = (userProfile.name||'U')[0].toUpperCase();
+  document.getElementById('modal-name').textContent     = userProfile.name||userProfile.username;
+  document.getElementById('modal-email').textContent    = userProfile.email||'—';
+  document.getElementById('modal-username').textContent = userProfile.username||'—';
+  document.getElementById('modal-joined').textContent   = userProfile.createdAt ? new Date(userProfile.createdAt).toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'}) : '—';
+  document.getElementById('modal-msgs').textContent     = userProfile.messageCount||0;
+  document.getElementById('profile-modal').classList.add('open');
+}
+function closeProfile(e){ if(e.target===document.getElementById('profile-modal')) document.getElementById('profile-modal').classList.remove('open'); }
+function closeProfileBtn(){ document.getElementById('profile-modal').classList.remove('open'); }
+function confirmLogout(){ if(confirm('Sign out of Pranvix?')){ auth.signOut(); window.location.href='login.html'; } }
+</script>
+</body>
+</html>
