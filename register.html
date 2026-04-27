@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Register — Pranvix AI</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+
+  <button class="theme-btn-auth" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+
+  <div class="card" style="max-width:450px">
+    <div class="logo">
+      <div class="logo-icon">🤖</div>
+      <span class="logo-text">Pranvix</span>
+    </div>
+
+    <h1>Create Account</h1>
+    <p class="subtitle">Join Pranvix — Your AI-Powered Study Companion</p>
+
+    <!-- BBDU-only badge -->
+    <div style="background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.35);
+                border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--accent);">
+      🏫 <strong>BBDU Students Only</strong> — Only <code>@bbdu.ac.in</code> emails are accepted.
+    </div>
+
+    <div class="alert error"   id="alert-error"></div>
+    <div class="alert success" id="alert-success"></div>
+
+    <div class="form-group">
+      <label for="name">Full Name</label>
+      <input type="text" id="name" placeholder="e.g. Ujjwal Singh" autocomplete="off"/>
+    </div>
+
+    <div class="form-group">
+      <label for="email">BBDU Email</label>
+      <input type="email" id="email" placeholder="yourname@bbdu.ac.in"/>
+      <div id="email-hint" style="font-size:12px;margin-top:4px;display:none"></div>
+    </div>
+
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" placeholder="Choose a username (min. 3 chars)" autocomplete="off"/>
+    </div>
+
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="Min. 6 characters"/>
+    </div>
+
+    <div class="form-group">
+      <label for="confirm">Confirm Password</label>
+      <input type="password" id="confirm" placeholder="Re-enter your password"/>
+    </div>
+
+    <button class="btn" id="reg-btn" onclick="handleRegister()">Create Account →</button>
+
+    <div class="link-row" style="margin-top:16px">
+      Already have an account? <a href="login.html">Sign in</a>
+    </div>
+
+    <div class="support-bar">
+      Need help? <a href="mailto:ujjwalsingh16072006@bbdu.ac.in">ujjwalsingh16072006@bbdu.ac.in</a>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script>
+    firebase.initializeApp(FIREBASE_CONFIG);
+    const auth = firebase.auth();
+    const db   = firebase.firestore();
+
+    // ── Theme ──────────────────────────────────────────────────
+    function applyTheme() {
+      const t = localStorage.getItem('pranvix_theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      const btn = document.getElementById('theme-toggle');
+      if (btn) btn.textContent = t === 'dark' ? '☀️' : '🌙';
+    }
+    function toggleTheme() {
+      const next = (localStorage.getItem('pranvix_theme') || 'dark') === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('pranvix_theme', next);
+      applyTheme();
+    }
+    applyTheme();
+
+    auth.onAuthStateChanged(u => { if (u) window.location.href = 'chatbot.html'; });
+
+    // ── Real-time email validation hint ────────────────────────
+    document.getElementById('email').addEventListener('input', function() {
+      const hint = document.getElementById('email-hint');
+      const val  = this.value.trim();
+      if (!val) { hint.style.display = 'none'; return; }
+      if (val.endsWith('@bbdu.ac.in')) {
+        hint.style.cssText = 'font-size:12px;margin-top:4px;display:block;color:#22c55e';
+        hint.textContent = '✅ Valid BBDU email';
+      } else if (val.includes('@')) {
+        hint.style.cssText = 'font-size:12px;margin-top:4px;display:block;color:#ef4444';
+        hint.textContent = '🚫 Only @bbdu.ac.in emails are allowed';
+      } else {
+        hint.style.display = 'none';
+      }
+    });
+
+    function showAlert(id, type, msg) {
+      const el = document.getElementById(id);
+      el.className = `alert ${type}`;
+      el.innerHTML = msg;
+      el.style.display = 'block';
+    }
+    function hideAlerts() {
+      document.getElementById('alert-error').style.display   = 'none';
+      document.getElementById('alert-success').style.display = 'none';
+    }
+    function setLoading(on) {
+      const btn = document.getElementById('reg-btn');
+      btn.textContent = on ? 'Creating account...' : 'Create Account →';
+      btn.disabled = on;
+    }
+
+    async function handleRegister() {
+      hideAlerts();
+      const name     = document.getElementById('name').value.trim();
+      const email    = document.getElementById('email').value.trim();
+      const username = document.getElementById('username').value.trim().toLowerCase();
+      const password = document.getElementById('password').value;
+      const confirm  = document.getElementById('confirm').value;
+
+      if (!name || !email || !username || !password || !confirm)
+        return showAlert('alert-error', 'error', '⚠️ Please fill in all fields.');
+
+      // ── BBDU email restriction ─────────────────────────────
+      if (!email.endsWith('@bbdu.ac.in'))
+        return showAlert('alert-error', 'error',
+          '🚫 Only <strong>@bbdu.ac.in</strong> email addresses are allowed. This platform is exclusively for BBDU students.');
+
+      if (username.length < 3)
+        return showAlert('alert-error', 'error', '⚠️ Username must be at least 3 characters.');
+      if (!/^[a-z0-9_]+$/.test(username))
+        return showAlert('alert-error', 'error', '⚠️ Username can only contain letters, numbers, and underscores.');
+      if (password.length < 6)
+        return showAlert('alert-error', 'error', '⚠️ Password must be at least 6 characters.');
+      if (password !== confirm)
+        return showAlert('alert-error', 'error', '⚠️ Passwords do not match.');
+
+      setLoading(true);
+      try {
+        // Check if username already taken
+        const usernameCheck = await db.collection('usernames').doc(username).get();
+        if (usernameCheck.exists)
+          return showAlert('alert-error', 'error', '❌ Username already taken. Choose another.');
+
+        // Create Firebase Auth account
+        const cred = await auth.createUserWithEmailAndPassword(email, password);
+        const uid  = cred.user.uid;
+        const now  = new Date().toISOString();
+
+        // Reserve username
+        await db.collection('usernames').doc(username).set({ uid });
+
+        // Save user profile in Firestore
+        await db.collection('users').doc(uid).set({
+          uid, name, email, username,
+          createdAt: now,
+          lastLogin: now,
+          isBanned: false,
+          messageCount: 0,
+          isAdmin: email === ADMIN_EMAIL
+        });
+
+        // Update global stats
+        await db.collection('stats').doc('global').set({
+          totalUsers: firebase.firestore.FieldValue.increment(1)
+        }, { merge: true });
+
+        showAlert('alert-success', 'success', '✅ Account created! Redirecting to chat...');
+        setTimeout(() => window.location.href = 'chatbot.html', 1200);
+
+      } catch (err) {
+        const msg = err.code === 'auth/email-already-in-use' ? '❌ This email is already registered. Try logging in.'
+                  : err.code === 'auth/invalid-email'        ? '❌ Invalid email address.'
+                  : `❌ ${err.message}`;
+        showAlert('alert-error', 'error', msg);
+      } finally { setLoading(false); }
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Enter') handleRegister(); });
+  </script>
+</body>
+</html>

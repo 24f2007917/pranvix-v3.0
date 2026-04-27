@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pranvix — AI Chat</title>
+  <link rel="stylesheet" href="style.css"/>
+  <!-- PDF.js for client-side PDF text extraction -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    .file-btn{background:none;border:none;cursor:pointer;font-size:20px;padding:0 6px;opacity:.7;transition:opacity .2s}
+    .file-btn:hover{opacity:1}
+    .file-preview{display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:var(--text)}
+    .file-preview img{width:40px;height:40px;object-fit:cover;border-radius:6px}
+    .file-preview .fp-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .fp-remove{background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px}
+    .msg-attachment{display:inline-block;background:var(--surface2);border-radius:8px;padding:6px 10px;margin-top:6px;font-size:12px}
+    .msg-attachment a{color:var(--accent);text-decoration:none}
+    .msg-attachment img{max-width:200px;border-radius:8px;display:block;margin-top:6px}
+    .model-badge{font-size:10px;background:rgba(99,102,241,.15);color:var(--accent);padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+    .admin-link-btn{background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-left:6px}
+    .pdf-extracting{font-size:12px;color:var(--muted);padding:4px 0}
+  </style>
+</head>
+<body class="chat-body">
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<!-- Profile Modal -->
+<div class="modal-overlay" id="profile-modal" onclick="closeProfile(event)">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="closeProfileBtn()">✕</button>
+    <div class="profile-avatar-lg" id="modal-avatar">U</div>
+    <div class="profile-name" id="modal-name">User</div>
+    <div class="profile-role">B.Tech CSE AI&amp;B 1-A &bull; BBDU</div>
+    <div class="profile-info-grid" style="margin-top:20px">
+      <div class="profile-info-item"><div class="pii-icon">📧</div><div><div class="pii-label">Email</div><div class="pii-value" id="modal-email">—</div></div></div>
+      <div class="profile-info-item"><div class="pii-icon">👤</div><div><div class="pii-label">Username</div><div class="pii-value" id="modal-username">—</div></div></div>
+      <div class="profile-info-item"><div class="pii-icon">📅</div><div><div class="pii-label">Member Since</div><div class="pii-value" id="modal-joined">—</div></div></div>
+      <div class="profile-info-item"><div class="pii-icon">💬</div><div><div class="pii-label">Total Messages</div><div class="pii-value" id="modal-msgs">0</div></div></div>
+    </div>
+    <div class="modal-footer">
+      🤖 Pranvix AI &bull; Java Fundamentals Project &bull; BBDU 2024–25<br>
+      <span style="margin-top:4px;display:block">Pratiksha &bull; Anvesha Chauhan &bull; Ujjwal Singh</span>
+    </div>
+  </div>
+</div>
+
+<div style="display:flex;flex:1;overflow:hidden;width:100%">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo"><div class="logo-icon">🤖</div><span class="logo-text">Pranvix</span></div>
+      <button class="new-chat-btn" onclick="newChat()">+ New Chat</button>
+    </div>
+    <div class="sidebar-section-title">Chat History</div>
+    <div class="history-list" id="history-list"><div style="padding:16px 10px;font-size:13px;color:var(--muted);text-align:center">Loading chats...</div></div>
+    <div class="sidebar-footer">
+      <div class="sf-avatar" id="sf-avatar">U</div>
+      <div class="sf-info"><div class="sf-name" id="sf-name">User</div><div class="sf-role">B.Tech CSE AI&amp;B 1-A</div></div>
+      <button class="sf-btn" onclick="openProfile()" title="View Profile">⚙️</button>
+    </div>
+  </aside>
+
+  <main class="chat-main">
+    <header class="chat-header">
+      <div class="chat-header-left"><div class="chat-title">🤖 Pranvix AI</div></div>
+      <div class="chat-header-right">
+        <span id="admin-badge" style="display:none"><button class="admin-link-btn" onclick="window.location.href='admin.html'">🛡 Admin</button></span>
+        <button class="icon-btn" id="theme-toggle" onclick="handleThemeToggle()" title="Toggle theme">☀️</button>
+        <button class="icon-btn" onclick="openProfile()" title="Profile">👤</button>
+        <button class="icon-btn" onclick="confirmLogout()" title="Sign out" style="color:var(--red)">⏻</button>
+      </div>
+    </header>
+
+    <div class="chat-container" id="chat-container"></div>
+
+    <footer class="chat-footer">
+      <div id="file-preview-area" style="display:none;padding:0 4px 4px"></div>
+      <div class="input-row">
+        <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,.pdf" style="display:none" onchange="handleFileSelect(event)"/>
+        <button class="file-btn" onclick="document.getElementById('file-input').click()" title="Attach image or PDF">📎</button>
+        <input type="text" id="chat-input" placeholder="Ask Pranvix anything..." autocomplete="off"/>
+        <button id="send-btn" onclick="sendMessage()">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      <div class="footer-bottom">
+        <div class="suggestions">
+          <span class="chip" onclick="quickSend('Explain Java OOP with examples')">☕ Java OOP</span>
+          <span class="chip" onclick="quickSend('Explain SQL with basic queries')">🗄 SQL</span>
+          <span class="chip" onclick="quickSend('Tell me a programming joke')">😂 Joke</span>
+          <span class="chip" onclick="quickSend('Help me understand arrays in Java')">📦 Arrays</span>
+          <span class="chip" onclick="quickSend('What is HTML and CSS?')">🌐 HTML/CSS</span>
+        </div>
+        <div class="token-info" id="token-info"></div>
+      </div>
+    </footer>
+  </main>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+// Set PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth    = firebase.auth();
+const db      = firebase.firestore();
+const storage = firebase.storage();
+
+let currentUser = null, userProfile = null;
+let conversationHistory = [], isTyping = false, currentSessionId = null;
+let pendingFile = null; // { file, type:'image'|'pdf', name, previewUrl, base64, mimeType, extractedText }
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function applyTheme() {
+  const t = localStorage.getItem('pranvix_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+}
+function handleThemeToggle() {
+  const next = (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('pranvix_theme', next);
+  applyTheme();
+  document.getElementById('theme-toggle').textContent = next === 'dark' ? '☀️' : '🌙';
+}
+applyTheme();
+document.getElementById('theme-toggle').textContent = (localStorage.getItem('pranvix_theme')||'dark') === 'dark' ? '☀️' : '🌙';
+
+// ── Auth Guard ─────────────────────────────────────────────────────────────
+auth.onAuthStateChanged(async user => {
+  if (!user) { window.location.href = 'login.html'; return; }
+  currentUser = user;
+  const doc = await db.collection('users').doc(user.uid).get();
+  if (!doc.exists || doc.data().isBanned) { await auth.signOut(); window.location.href = 'login.html'; return; }
+  userProfile = doc.data();
+  if (userProfile.isAdmin || user.email === ADMIN_EMAIL)
+    document.getElementById('admin-badge').style.display = 'inline';
+  document.getElementById('sf-name').textContent   = userProfile.name || userProfile.username;
+  document.getElementById('sf-avatar').textContent = (userProfile.name||'U')[0].toUpperCase();
+  loadSidebar();
+  const sessions = await getSessions();
+  if (sessions.length > 0) loadSession(sessions[0].id); else newChat();
+});
+
+// ── Firestore helpers ──────────────────────────────────────────────────────
+async function getSessions() {
+  const snap = await db.collection('chats').doc(currentUser.uid)
+    .collection('sessions').orderBy('updatedAt','desc').limit(30).get();
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+async function createSession(title='New Chat') {
+  const now = new Date().toISOString();
+  const ref = await db.collection('chats').doc(currentUser.uid)
+    .collection('sessions').add({ title, createdAt: now, updatedAt: now, messages: [] });
+  return ref.id;
+}
+async function saveMessageToFirestore(sessionId, message) {
+  const ref = db.collection('chats').doc(currentUser.uid).collection('sessions').doc(sessionId);
+  await ref.update({ messages: firebase.firestore.FieldValue.arrayUnion(message), updatedAt: new Date().toISOString() });
+  const doc = await ref.get();
+  if (message.role==='user' && doc.data().title==='New Chat') {
+    await ref.update({ title: message.content.substring(0,40)+(message.content.length>40?'…':'') });
+  }
+  await db.collection('users').doc(currentUser.uid).update({ messageCount: firebase.firestore.FieldValue.increment(1) });
+  const today = new Date().toISOString().split('T')[0];
+  await db.collection('stats').doc('global').set({
+    totalMessages: firebase.firestore.FieldValue.increment(1),
+    [`daily.${today}`]: firebase.firestore.FieldValue.increment(1)
+  }, { merge: true });
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+async function loadSidebar() {
+  const sessions = await getSessions();
+  const list = document.getElementById('history-list');
+  if (!sessions.length) { list.innerHTML = `<div style="padding:16px 10px;font-size:13px;color:var(--muted);text-align:center">No chats yet.<br>Start a conversation!</div>`; return; }
+  const today = new Date().toDateString(), yesterday = new Date(Date.now()-86400000).toDateString();
+  const groups = {};
+  sessions.forEach(s => {
+    const d = new Date(s.createdAt).toDateString();
+    const label = d===today?'Today':d===yesterday?'Yesterday':new Date(s.createdAt).toLocaleDateString('en-IN',{month:'short',day:'numeric'});
+    if (!groups[label]) groups[label]=[];
+    groups[label].push(s);
+  });
+  let html = '';
+  for (const [label, items] of Object.entries(groups)) {
+    html += `<div class="history-date-label">${label}</div>`;
+    items.forEach(s => {
+      html += `<div class="history-item ${s.id===currentSessionId?'active':''}" onclick="loadSession('${s.id}')" title="${s.title}">
+        <span class="hi-icon">💬</span><span class="hi-text">${s.title}</span>
+        <button onclick="deleteSession('${s.id}',event)" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;margin-left:auto">✕</button>
+      </div>`;
+    });
+  }
+  list.innerHTML = html;
+}
+
+async function newChat() {
+  currentSessionId = await createSession('New Chat');
+  conversationHistory = [];
+  document.getElementById('chat-container').innerHTML = '';
+  document.getElementById('token-info').textContent = '';
+  await loadSidebar();
+  setTimeout(showWelcome, 250);
+}
+async function loadSession(sessionId) {
+  currentSessionId = sessionId;
+  const doc = await db.collection('chats').doc(currentUser.uid).collection('sessions').doc(sessionId).get();
+  if (!doc.exists) return;
+  conversationHistory = [];
+  document.getElementById('chat-container').innerHTML = '';
+  (doc.data().messages||[]).slice(-30).forEach(m => {
+    const html = m.role==='assistant' ? fmt(m.content) : (m.content + (m.attachment?renderAttachment(m.attachment):''));
+    addMessage(html, m.role==='assistant'?'bot':'user');
+    conversationHistory.push({ role: m.role, content: m.content });
+  });
+  document.getElementById('chat-container').scrollTop = 99999;
+  await loadSidebar();
+}
+async function deleteSession(id, e) {
+  e.stopPropagation();
+  await db.collection('chats').doc(currentUser.uid).collection('sessions').doc(id).delete();
+  if (id===currentSessionId) {
+    const sessions = await getSessions();
+    if (sessions.length>0) await loadSession(sessions[0].id); else await newChat();
+  }
+  await loadSidebar();
+}
+
+// ── File Handling ──────────────────────────────────────────────────────────
+async function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const isImage = file.type.startsWith('image/');
+  const isPDF   = file.type === 'application/pdf';
+  if (!isImage && !isPDF) return alert('Only images (JPG/PNG/WEBP) and PDFs are supported.');
+  if (file.size > 10 * 1024 * 1024) return alert('File must be under 10MB.');
+
+  const area = document.getElementById('file-preview-area');
+  area.style.display = 'block';
+
+  if (isImage) {
+    // Read as base64 for Gemini Vision
+    const reader = new FileReader();
+    reader.onload = e => {
+      const base64Full = e.target.result; // data:image/jpeg;base64,xxxx
+      const base64     = base64Full.split(',')[1];
+      pendingFile = { file, type:'image', name:file.name, mimeType:file.type, base64, previewUrl:base64Full };
+      area.innerHTML = `<div class="file-preview">
+        <img src="${base64Full}" alt="preview"/>
+        <span class="fp-name">🖼️ ${file.name} <small style="color:var(--accent)">(Gemini Vision)</small></span>
+        <button class="fp-remove" onclick="clearPendingFile()">✕</button>
+      </div>`;
+    };
+    reader.readAsDataURL(file);
+
+  } else if (isPDF) {
+    // Extract text client-side using PDF.js, then send to Groq
+    area.innerHTML = `<div class="file-preview"><span>📄</span><span class="fp-name">${file.name}</span><span class="pdf-extracting" id="pdf-status">⏳ Extracting text...</span></div>`;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf         = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let extractedText = `[PDF: ${file.name}]\n\n`;
+      for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
+        const page    = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        extractedText += `--- Page ${i} ---\n` + content.items.map(s => s.str).join(' ') + '\n\n';
+      }
+      pendingFile = { file, type:'pdf', name:file.name, extractedText };
+      document.getElementById('pdf-status').textContent = `✅ ${pdf.numPages} page(s) extracted → Groq`;
+      area.innerHTML = `<div class="file-preview">
+        <span>📄</span>
+        <span class="fp-name">${file.name} <small style="color:var(--accent)">(${pdf.numPages} pages → Groq)</small></span>
+        <button class="fp-remove" onclick="clearPendingFile()">✕</button>
+      </div>`;
+    } catch (err) {
+      area.innerHTML = '';
+      area.style.display = 'none';
+      alert('Could not extract PDF text: ' + err.message);
+    }
+  }
+  event.target.value = '';
+}
+
+function clearPendingFile() {
+  pendingFile = null;
+  const area = document.getElementById('file-preview-area');
+  area.style.display = 'none'; area.innerHTML = '';
+}
+
+async function uploadFileToStorage(file) {
+  const path = `uploads/${currentUser.uid}/${Date.now()}_${file.name}`;
+  const snap = await storage.ref(path).put(file);
+  const url  = await snap.ref.getDownloadURL();
+  await db.collection('uploads').doc(currentUser.uid).collection('files').add({
+    name:file.name, url, type:pendingFile.type, size:file.size, path, uploadedAt:new Date().toISOString()
+  });
+  return url;
+}
+
+function renderAttachment(att) {
+  if (att.type==='image') return `<div class="msg-attachment"><img src="${att.url}" alt="${att.name}"/><a href="${att.url}" target="_blank">📎 ${att.name}</a></div>`;
+  return `<div class="msg-attachment">📄 <a href="${att.url}" target="_blank">${att.name}</a></div>`;
+}
+
+// ── Markdown ───────────────────────────────────────────────────────────────
+function fmt(text) {
+  return text
+    .replace(/```(\w*)\n?([\s\S]*?)```/g,'<pre><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/^#{3}\s(.+)$/gm,'<h4 style="margin:8px 0 4px;color:var(--accent)">$1</h4>')
+    .replace(/^#{2}\s(.+)$/gm,'<h3 style="margin:10px 0 5px;color:var(--accent)">$1</h3>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>')
+    .replace(/(<li>[\s\S]+?<\/li>)/g,'<ul>$1</ul>')
+    .replace(/\n{2,}/g,'<br><br>')
+    .replace(/\n/g,'<br>');
+}
+
+// ── UI ─────────────────────────────────────────────────────────────────────
+function addMessage(html, sender, isError=false, modelBadge='') {
+  const container = document.getElementById('chat-container');
+  const div = document.createElement('div');
+  div.className = `message ${sender}`;
+  const av = sender==='bot' ? 'PX' : (userProfile?.name||'U')[0].toUpperCase();
+  const badge = modelBadge ? `<span class="model-badge">${modelBadge}</span>` : '';
+  div.innerHTML = `<div class="msg-avatar">${av}</div><div class="msg-bubble ${isError?'error-bubble':''}">${html}${badge}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+function showTyping() {
+  const c=document.getElementById('chat-container');
+  const d=document.createElement('div'); d.className='message bot'; d.id='typing-indicator';
+  d.innerHTML=`<div class="msg-avatar">PX</div><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  c.appendChild(d); c.scrollTop=c.scrollHeight;
+}
+function removeTyping(){ document.getElementById('typing-indicator')?.remove(); }
+function setSendState(on) {
+  isTyping=on;
+  document.getElementById('chat-input').disabled=on;
+  const btn=document.getElementById('send-btn');
+  btn.style.opacity=on?'0.5':'1'; btn.style.cursor=on?'not-allowed':'pointer';
+}
+function showWelcome() {
+  addMessage(`👋 Hello, <strong>${userProfile?.name}</strong>! I'm <strong>Pranvix AI</strong> 🤖<br><br>
+   Your AI-Powered Study Companion. I can help with Java, Python, SQL, HTML/CSS and more!<br><br>
+   📎 <strong>File support:</strong><br>
+   • 🖼️ Images → analyzed by <strong>Gemini 1.5 Flash Vision</strong><br>
+   • 📄 PDFs → text extracted locally, answered by <strong>Groq Llama 3</strong><br><br>
+   Type your question or pick a suggestion below! 🚀`, 'bot');
+}
+
+// ── API Call ───────────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = () => `You are Pranvix, a friendly and intelligent AI assistant created as a college project by Pratiksha, Anvesha Chauhan, and Ujjwal Singh — B.Tech CSE AI&B 1-A students at Babu Banarasi Das University (BBDU), Lucknow, for their Java Fundamentals subject.
+Your personality: friendly, encouraging, clear structured explanations, use emojis occasionally, format code with backtick code blocks.
+Specialise in: Java, Python, Web Dev, SQL, Data Structures, and general CS topics.
+The user's name is: ${userProfile?.name||'Student'}.`;
+
+async function callAPI(userMessage, imageBase64=null, imageMimeType=null) {
+  conversationHistory.push({ role:'user', content:userMessage });
+  if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-40);
+
+  const body = { system: SYSTEM_PROMPT(), messages: conversationHistory };
+  if (imageBase64 && imageMimeType) { body.imageBase64=imageBase64; body.imageMimeType=imageMimeType; }
+
+  const response = await fetch('/api/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message||`Server error ${response.status}`);
+
+  const reply = data.content[0].text;
+  conversationHistory.push({ role:'assistant', content:reply });
+
+  // Show model badge + token info
+  const modelLabel = data.model==='gemini-1.5-flash' ? '✨ Gemini' : '⚡ Groq';
+  if (data.usage?.output_tokens)
+    document.getElementById('token-info').textContent = `${data.usage.input_tokens} in · ${data.usage.output_tokens} out`;
+
+  return { reply, modelLabel };
+}
+
+// ── Send ───────────────────────────────────────────────────────────────────
+async function sendMessage() {
+  if (isTyping) return;
+  const input   = document.getElementById('chat-input');
+  const text    = input.value.trim();
+  const hasFile = !!pendingFile;
+  if (!text && !hasFile) return;
+  input.value = '';
+  setSendState(true);
+
+  let fileAttachment = null, messageText = text, imageBase64 = null, imageMimeType = null;
+
+  if (hasFile) {
+    if (pendingFile.type === 'image') {
+      // Upload to storage for display, also keep base64 for Gemini
+      showTyping();
+      try {
+        const url = await uploadFileToStorage(pendingFile.file);
+        fileAttachment = { url, name:pendingFile.name, type:'image' };
+        imageBase64    = pendingFile.base64;
+        imageMimeType  = pendingFile.mimeType;
+        if (!text) messageText = `Please analyze this image: ${pendingFile.name}`;
+      } catch(e) { removeTyping(); addMessage(`⚠️ Upload failed: ${e.message}`,'bot',true); setSendState(false); clearPendingFile(); return; }
+      removeTyping();
+
+    } else if (pendingFile.type === 'pdf') {
+      // Upload PDF to storage, append extracted text to user message
+      showTyping();
+      try {
+        const url = await uploadFileToStorage(pendingFile.file);
+        fileAttachment = { url, name:pendingFile.name, type:'pdf' };
+        messageText = (text ? text + '\n\n' : 'Please analyze the following PDF content:\n\n') + pendingFile.extractedText;
+      } catch(e) {
+        // Storage upload failed, still proceed with text-only
+        messageText = (text?text+'\n\n':'') + pendingFile.extractedText;
+      }
+      removeTyping();
+    }
+    clearPendingFile();
+  }
+
+  // Display user message (short version without giant PDF text)
+  const displayText = text || (pendingFile?.type==='image' ? `[Image: ${pendingFile?.name}]` : `[PDF: ${pendingFile?.name}]`);
+  const userHtml = (text||`<em style="color:var(--muted)">${hasFile?'Attached: '+fileAttachment?.name:''}</em>`) + (fileAttachment?renderAttachment(fileAttachment):'');
+  addMessage(userHtml, 'user');
+
+  await saveMessageToFirestore(currentSessionId, {
+    role:'user', content:messageText.substring(0,500), time:new Date().toISOString(),
+    ...(fileAttachment?{attachment:fileAttachment}:{})
+  });
+
+  showTyping();
+  try {
+    const { reply, modelLabel } = await callAPI(messageText, imageBase64, imageMimeType);
+    removeTyping();
+    addMessage(fmt(reply), 'bot', false, modelLabel);
+    await saveMessageToFirestore(currentSessionId, { role:'assistant', content:reply, time:new Date().toISOString() });
+    await loadSidebar();
+  } catch(err) {
+    removeTyping();
+    addMessage(`⚠️ <strong>Error:</strong> ${err.message}`, 'bot', true);
+  } finally { setSendState(false); input.focus(); }
+}
+
+function quickSend(t){ document.getElementById('chat-input').value=t; sendMessage(); }
+document.getElementById('chat-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} });
+
+// ── Profile ────────────────────────────────────────────────────────────────
+async function openProfile() {
+  document.getElementById('modal-avatar').textContent   = (userProfile.name||'U')[0].toUpperCase();
+  document.getElementById('modal-name').textContent     = userProfile.name||userProfile.username;
+  document.getElementById('modal-email').textContent    = userProfile.email||'—';
+  document.getElementById('modal-username').textContent = userProfile.username||'—';
+  document.getElementById('modal-joined').textContent   = userProfile.createdAt ? new Date(userProfile.createdAt).toLocaleDateString('en-IN',{year:'numeric',month:'long',day:'numeric'}) : '—';
+  document.getElementById('modal-msgs').textContent     = userProfile.messageCount||0;
+  document.getElementById('profile-modal').classList.add('open');
+}
+function closeProfile(e){ if(e.target===document.getElementById('profile-modal')) document.getElementById('profile-modal').classList.remove('open'); }
+function closeProfileBtn(){ document.getElementById('profile-modal').classList.remove('open'); }
+function confirmLogout(){ if(confirm('Sign out of Pranvix?')){ auth.signOut(); window.location.href='login.html'; } }
+</script>
+</body>
+</html>
