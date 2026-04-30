@@ -5,21 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Pranvix — AI Chat</title>
   <link rel="stylesheet" href="style.css"/>
-  <!-- PDF.js for client-side PDF text extraction -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
   <style>
-    .file-btn{background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.35);color:#a5b4fc;cursor:pointer;font-size:16px;padding:6px 10px;border-radius:8px;transition:all .2s;line-height:1}
-    .file-btn:hover{background:rgba(99,102,241,.3);color:#fff}
-    .file-preview{display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:var(--text)}
-    .file-preview img{width:40px;height:40px;object-fit:cover;border-radius:6px}
-    .file-preview .fp-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .fp-remove{background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px}
-    .msg-attachment{display:inline-block;background:var(--surface2);border-radius:8px;padding:6px 10px;margin-top:6px;font-size:12px}
-    .msg-attachment a{color:var(--accent);text-decoration:none}
-    .msg-attachment img{max-width:200px;border-radius:8px;display:block;margin-top:6px}
-    .model-badge{font-size:10px;background:rgba(99,102,241,.15);color:var(--accent);padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
     .admin-link-btn{background:none;border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;margin-left:6px}
-    .pdf-extracting{font-size:12px;color:var(--muted);padding:4px 0}
   </style>
 </head>
 <body class="chat-body">
@@ -75,10 +63,7 @@
     <div class="chat-container" id="chat-container"></div>
 
     <footer class="chat-footer">
-      <div id="file-preview-area" style="display:none;padding:0 4px 4px"></div>
       <div class="input-row">
-        <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,.pdf" style="display:none" onchange="handleFileSelect(event)"/>
-        <button class="file-btn" onclick="document.getElementById('file-input').click()" title="Attach image or PDF">📎</button>
         <input type="text" id="chat-input" placeholder="Ask Pranvix anything..." autocomplete="off"/>
         <button id="send-btn" onclick="sendMessage()">
           <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -102,20 +87,15 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script>
 // Set PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
 firebase.initializeApp(FIREBASE_CONFIG);
-const auth    = firebase.auth();
-const db      = firebase.firestore();
-const storage = firebase.storage();
+const auth = firebase.auth();
+const db   = firebase.firestore();
 
 let currentUser = null, userProfile = null;
 let conversationHistory = [], isTyping = false, currentSessionId = null;
-let pendingFile = null; // { file, type:'image'|'pdf', name, previewUrl, base64, mimeType, extractedText }
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 function applyTheme() {
@@ -215,7 +195,7 @@ async function loadSession(sessionId) {
   conversationHistory = [];
   document.getElementById('chat-container').innerHTML = '';
   (doc.data().messages||[]).slice(-30).forEach(m => {
-    const html = m.role==='assistant' ? fmt(m.content) : (m.content + (m.attachment?renderAttachment(m.attachment):''));
+    const html = m.role==='assistant' ? fmt(m.content) : m.content;
     addMessage(html, m.role==='assistant'?'bot':'user');
     conversationHistory.push({ role: m.role, content: m.content });
   });
@@ -230,82 +210,6 @@ async function deleteSession(id, e) {
     if (sessions.length>0) await loadSession(sessions[0].id); else await newChat();
   }
   await loadSidebar();
-}
-
-// ── File Handling ──────────────────────────────────────────────────────────
-async function handleFileSelect(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const isImage = file.type.startsWith('image/');
-  const isPDF   = file.type === 'application/pdf';
-  if (!isImage && !isPDF) return alert('Only images (JPG/PNG/WEBP) and PDFs are supported.');
-  if (file.size > 10 * 1024 * 1024) return alert('File must be under 10MB.');
-
-  const area = document.getElementById('file-preview-area');
-  area.style.display = 'block';
-
-  if (isImage) {
-    // Read as base64 for Gemini Vision
-    const reader = new FileReader();
-    reader.onload = e => {
-      const base64Full = e.target.result; // data:image/jpeg;base64,xxxx
-      const base64     = base64Full.split(',')[1];
-      pendingFile = { file, type:'image', name:file.name, mimeType:file.type, base64, previewUrl:base64Full };
-      area.innerHTML = `<div class="file-preview">
-        <img src="${base64Full}" alt="preview"/>
-        <span class="fp-name">🖼️ ${file.name} <small style="color:var(--accent)">(Gemini Vision)</small></span>
-        <button class="fp-remove" onclick="clearPendingFile()">✕</button>
-      </div>`;
-    };
-    reader.readAsDataURL(file);
-
-  } else if (isPDF) {
-    // Extract text client-side using PDF.js, then send to Groq
-    area.innerHTML = `<div class="file-preview"><span>📄</span><span class="fp-name">${file.name}</span><span class="pdf-extracting" id="pdf-status">⏳ Extracting text...</span></div>`;
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf         = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      let extractedText = `[PDF: ${file.name}]\n\n`;
-      for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
-        const page    = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        extractedText += `--- Page ${i} ---\n` + content.items.map(s => s.str).join(' ') + '\n\n';
-      }
-      pendingFile = { file, type:'pdf', name:file.name, extractedText };
-      document.getElementById('pdf-status').textContent = `✅ ${pdf.numPages} page(s) extracted → Groq`;
-      area.innerHTML = `<div class="file-preview">
-        <span>📄</span>
-        <span class="fp-name">${file.name} <small style="color:var(--accent)">(${pdf.numPages} pages → Groq)</small></span>
-        <button class="fp-remove" onclick="clearPendingFile()">✕</button>
-      </div>`;
-    } catch (err) {
-      area.innerHTML = '';
-      area.style.display = 'none';
-      alert('Could not extract PDF text: ' + err.message);
-    }
-  }
-  event.target.value = '';
-}
-
-function clearPendingFile() {
-  pendingFile = null;
-  const area = document.getElementById('file-preview-area');
-  area.style.display = 'none'; area.innerHTML = '';
-}
-
-async function uploadFileToStorage(file) {
-  const path = `uploads/${currentUser.uid}/${Date.now()}_${file.name}`;
-  const snap = await storage.ref(path).put(file);
-  const url  = await snap.ref.getDownloadURL();
-  await db.collection('uploads').doc(currentUser.uid).collection('files').add({
-    name:file.name, url, type:pendingFile.type, size:file.size, path, uploadedAt:new Date().toISOString()
-  });
-  return url;
-}
-
-function renderAttachment(att) {
-  if (att.type==='image') return `<div class="msg-attachment"><img src="${att.url}" alt="${att.name}"/><a href="${att.url}" target="_blank">📎 ${att.name}</a></div>`;
-  return `<div class="msg-attachment">📄 <a href="${att.url}" target="_blank">${att.name}</a></div>`;
 }
 
 // ── Markdown ───────────────────────────────────────────────────────────────
@@ -324,13 +228,12 @@ function fmt(text) {
 }
 
 // ── UI ─────────────────────────────────────────────────────────────────────
-function addMessage(html, sender, isError=false, modelBadge='') {
+function addMessage(html, sender, isError=false) {
   const container = document.getElementById('chat-container');
   const div = document.createElement('div');
   div.className = `message ${sender}`;
-  const badge = modelBadge ? `<span class="model-badge">${modelBadge}</span>` : '';
   const avatarHtml = sender === 'bot' ? `<div class="msg-avatar">PX</div>` : '';
-  div.innerHTML = `${avatarHtml}<div class="msg-bubble ${isError?'error-bubble':''}">${html}${badge}</div>`;
+  div.innerHTML = `${avatarHtml}<div class="msg-bubble ${isError?'error-bubble':''}">${html}</div>`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
@@ -350,9 +253,7 @@ function setSendState(on) {
 function showWelcome() {
   addMessage(`👋 Hello, <strong>${userProfile?.name}</strong>! I'm <strong>Pranvix AI</strong> 🤖<br><br>
    Your AI-Powered Study Companion. I can help with Java, Python, SQL, HTML/CSS and more!<br><br>
-   📎 <strong>File support:</strong><br>
-   • 🖼️ Images → analyzed by <strong>Gemini 1.5 Flash Vision</strong><br>
-   • 📄 PDFs → text extracted locally, answered by <strong>Groq Llama 3</strong><br><br>
+   📎 <strong>File support:</strong> You can attach images or PDFs using the button below.<br><br>
    Type your question or pick a suggestion below! 🚀`, 'bot');
 }
 
@@ -362,91 +263,47 @@ Your personality: friendly, encouraging, clear structured explanations, use emoj
 Specialise in: Java, Python, Web Dev, SQL, Data Structures, and general CS topics.
 The user's name is: ${userProfile?.name||'Student'}.`;
 
-async function callAPI(userMessage, imageBase64=null, imageMimeType=null) {
+async function callAPI(userMessage) {
   conversationHistory.push({ role:'user', content:userMessage });
   if (conversationHistory.length > 40) conversationHistory = conversationHistory.slice(-40);
 
-  const body = { system: SYSTEM_PROMPT(), messages: conversationHistory };
-  if (imageBase64 && imageMimeType) { body.imageBase64=imageBase64; body.imageMimeType=imageMimeType; }
-
   const response = await fetch('/api/chat', {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ system: SYSTEM_PROMPT(), messages: conversationHistory })
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error?.message||`Server error ${response.status}`);
 
   const reply = data.content[0].text;
   conversationHistory.push({ role:'assistant', content:reply });
-
-  // Show model badge + token info
-  const modelLabel = data.model==='gemini-1.5-flash' ? '✨ Gemini' : '⚡ Groq';
   if (data.usage?.output_tokens)
     document.getElementById('token-info').textContent = `${data.usage.input_tokens} in · ${data.usage.output_tokens} out`;
 
-  return { reply, modelLabel };
+  return reply;
 }
 
 // ── Send ───────────────────────────────────────────────────────────────────
 async function sendMessage() {
   if (isTyping) return;
-  const input   = document.getElementById('chat-input');
-  const text    = input.value.trim();
-  const hasFile = !!pendingFile;
-  if (!text && !hasFile) return;
+  const input = document.getElementById('chat-input');
+  const text  = input.value.trim();
+  if (!text) return;
   input.value = '';
   setSendState(true);
 
-  let fileAttachment = null, messageText = text, imageBase64 = null, imageMimeType = null;
-
-  if (hasFile) {
-    if (pendingFile.type === 'image') {
-      // Upload to storage for display, also keep base64 for Gemini
-      showTyping();
-      try {
-        const url = await uploadFileToStorage(pendingFile.file);
-        fileAttachment = { url, name:pendingFile.name, type:'image' };
-        imageBase64    = pendingFile.base64;
-        imageMimeType  = pendingFile.mimeType;
-        if (!text) messageText = `Please analyze this image: ${pendingFile.name}`;
-      } catch(e) { removeTyping(); addMessage(`⚠️ Upload failed: ${e.message}`,'bot',true); setSendState(false); clearPendingFile(); return; }
-      removeTyping();
-
-    } else if (pendingFile.type === 'pdf') {
-      // Upload PDF to storage, append extracted text to user message
-      showTyping();
-      try {
-        const url = await uploadFileToStorage(pendingFile.file);
-        fileAttachment = { url, name:pendingFile.name, type:'pdf' };
-        messageText = (text ? text + '\n\n' : 'Please analyze the following PDF content:\n\n') + pendingFile.extractedText;
-      } catch(e) {
-        // Storage upload failed, still proceed with text-only
-        messageText = (text?text+'\n\n':'') + pendingFile.extractedText;
-      }
-      removeTyping();
-    }
-    clearPendingFile();
-  }
-
-  // Display user message (short version without giant PDF text)
-  const displayText = text || (pendingFile?.type==='image' ? `[Image: ${pendingFile?.name}]` : `[PDF: ${pendingFile?.name}]`);
-  const userHtml = (text||`<em style="color:var(--muted)">${hasFile?'Attached: '+fileAttachment?.name:''}</em>`) + (fileAttachment?renderAttachment(fileAttachment):'');
-  addMessage(userHtml, 'user');
-
-  await saveMessageToFirestore(currentSessionId, {
-    role:'user', content:messageText.substring(0,500), time:new Date().toISOString(),
-    ...(fileAttachment?{attachment:fileAttachment}:{})
-  });
+  addMessage(text, 'user');
+  await saveMessageToFirestore(currentSessionId, { role:'user', content:text, time:new Date().toISOString() });
 
   showTyping();
   try {
-    const { reply, modelLabel } = await callAPI(messageText, imageBase64, imageMimeType);
+    const reply = await callAPI(text);
     removeTyping();
-    addMessage(fmt(reply), 'bot', false, modelLabel);
+    addMessage(fmt(reply), 'bot');
     await saveMessageToFirestore(currentSessionId, { role:'assistant', content:reply, time:new Date().toISOString() });
     await loadSidebar();
   } catch(err) {
     removeTyping();
-    addMessage(`⚠️ <strong>Error:</strong> ${err.message}`, 'bot', true);
+    addMessage(err.message, 'bot', true);
   } finally { setSendState(false); input.focus(); }
 }
 
