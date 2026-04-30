@@ -17,7 +17,7 @@ module.exports = async function(req, res) {
   const { system, messages } = req.body;
 
   const payload = JSON.stringify({
-    model: 'llama-3.1-8b-instant',
+    model: 'llama-3.3-70b-versatile',
     messages: [
       { role: 'system', content: system },
       ...messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content }))
